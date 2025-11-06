@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PersonelLeaveManagement.Domain\PersonelLeaveManagement.Domain.csproj" />
+    <ProjectReference Include="..\PersonelLeaveManagement.Application\PersonelLeaveManagement.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

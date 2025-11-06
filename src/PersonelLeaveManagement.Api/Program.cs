@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PersonelLeaveManagement.Infrastructure.Persistence;
+using PersonelLeaveManagement.Application.Interfaces;
+using PersonelLeaveManagement.Infrastructure.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +11,8 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
 options.UseSqlServer(connectionString));
 
+builder.Services.AddScoped<IPersonelService, PersonelService>();
+builder.Services.AddScoped<IIzinTalebiService, IzinTalebiService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
