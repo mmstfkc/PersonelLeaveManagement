@@ -10,8 +10,18 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("Logs/log-.txt")
+    .Enrich.FromLogContext()
+    .CreateLogger();
+
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog();
 
 builder.Services.AddControllers()
     .AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<PersonelValidator>());

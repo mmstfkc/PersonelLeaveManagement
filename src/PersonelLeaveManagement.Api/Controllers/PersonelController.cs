@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using PersonelLeaveManagement.Application.DTOs;
 using PersonelLeaveManagement.Application.Interfaces;
 
@@ -15,9 +16,11 @@ public class PersonelController : ControllerBase
         _service = service;
     }
 
+    [Authorize(Roles ="Admin")]
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _service.GetAllAsync());
 
+    [Authorize(Roles = "Admin, User")]
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(int id)
     {

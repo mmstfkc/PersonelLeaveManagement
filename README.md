@@ -1221,3 +1221,151 @@ Bearer <token> formatında yapıştır.
 [HttpGet("secret")]
 public IActionResult SecretArea() => Ok("Sadece token'lı kullanıcılar burayı görebilir!");
 ```
+
+
+# Rol Bazlı Erişim + Serilog Logging + Ortam Bazlı Yapı (Development / Production)
+
+Bu adım sonrasında API’n şunları yapabiliyor olacak:
+
+- ✅ Kullanıcı rolleri (“Admin”, “User” vb.) ile endpoint koruması
+- ✅ Her istek ve hata için dosyaya + konsola loglama
+- ✅ Development / Production ortamına göre farklı ayarlar kullanma
+
+## ROL BAZLI ERİŞİM
+
+JWT sistemimizde zaten her kullanıcıda Rol alanı var.
+Bu sayede sadece 2 küçük adımda rol bazlı erişim aktif hale geliyor.
+
+🔹 1️⃣ Controller’da örnek kullanım
+
+Herhangi bir controller’a (örneğin PersonelController) ekle:
+```c#
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using PersonelLeaveManagement.Application.Interfaces;
+
+namespace PersonelLeaveManagement.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class PersonelController : ControllerBase
+{
+    private readonly IPersonelService _service;
+
+    public PersonelController(IPersonelService service)
+    {
+        _service = service;
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("all")]
+    public async Task<IActionResult> GetAll() => Ok(await _service.GetAllAsync());
+
+    [Authorize(Roles = "User,Admin")]
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetById(int id)
+    {
+        var personel = await _service.GetByIdAsync(id);
+        return personel == null ? NotFound() : Ok(personel);
+    }
+}
+```
+
+## SERILOG LOGGING
+
+Artık her isteği ve hatayı dosyaya + konsola loglayacağız.
+
+🔹 1️⃣ NuGet paketi ekle
+
+```c#
+dotnet add PersonelLeaveManagement.Api package Serilog.AspNetCore
+dotnet add PersonelLeaveManagement.Api package Serilog.Sinks.File
+dotnet add PersonelLeaveManagement.Api package Serilog.Sinks.Console
+```
+
+##🔹 2️⃣ Program.cs içine ekle (en üstte)
+```c#
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File("Logs/log-.txt", rollingInterval: RollingInterval.Day)
+    .Enrich.FromLogContext()
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+```
+
+Bu, logları hem terminalde hem de /Logs/log-2025-11-11.txt gibi günlük dosyalarda tutar.
+
+
+## 🔹 3️⃣ ExceptionMiddleware’de log’ları zenginleştir
+
+ExceptionMiddleware.cs içinde şu satır zaten vardı:
+
+```c#
+_logger.LogError(ex, "Beklenmeyen hata oluştu: {Message}", ex.Message);
+```
+
+Serilog entegre olduğunda bu log otomatik olarak dosyaya ve konsola yazılır ✅
+
+## ORTAM BAZLI AYARLAR (Development / Production)
+
+Artık appsettings.json dosyasını ikiye ayırıyoruz:
+
+- appsettings.Development.json
+
+- appsettings.Production.json
+
+
+🔹 1️⃣ appsettings.Development.json
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost,1433;Database=PersonelDB;User Id=sa;Password=YourPassword123;TrustServerCertificate=True;"
+  },
+  "Jwt": {
+    "Key": "dev_secret_key_12345",
+    "Issuer": "personelapi_dev",
+    "Audience": "personelapi_users_dev"
+  },
+  "Serilog": {
+    "MinimumLevel": "Debug"
+  }
+}
+```
+
+🔹 2️⃣ appsettings.Production.json
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=prod-sql-server;Database=PersonelDB;User Id=sa;Password=ProdPassword!;TrustServerCertificate=True;"
+  },
+  "Jwt": {
+    "Key": "prod_secret_key_45678",
+    "Issuer": "personelapi_prod",
+    "Audience": "personelapi_users_prod"
+  },
+  "Serilog": {
+    "MinimumLevel": "Information"
+  }
+}
+```
+
+🔹 3️⃣ launchSettings.json kontrolü
+
+Properties/launchSettings.json içinde environment ayarı olmalı:
+```json
+"profiles": {
+  "PersonelLeaveManagement.Api": {
+    "commandName": "Project",
+    "launchBrowser": true,
+    "environmentVariables": {
+      "ASPNETCORE_ENVIRONMENT": "Development"
+    },
+    "applicationUrl": "https://localhost:7234;http://localhost:5030"
+  }
+}
+```
+
+Production’a geçtiğinde bu değişkeni “Production” yapman yeterli.
