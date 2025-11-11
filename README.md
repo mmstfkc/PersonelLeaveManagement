@@ -952,3 +952,272 @@ Rastgele exception fırlatmak için bir metodda throw new Exception("Test"); der
 Middleware bunu yakalayıp { "Message": "Sunucu hatası oluştu." } döner.
 
 Kod artık repository pattern, validation, global error handling ile kurumsal hale geldi 🎯
+
+# JWT entegrasyonu
+## Genel Yapı
+
+JWT (JSON Web Token) sistemi 3 temel parçadan oluşur:
+
+- 1️⃣ User (Kullanıcı) tablosu — Kimlik bilgilerini tutar (email, şifre, rol vs.)
+- 2️⃣ AuthService — Login olur, JWT üretir
+- 3️⃣ AuthController — /api/Auth/login endpoint’ini dış dünyaya açar
+
+Ek olarak:
+
+- Program.cs içinde JWT ayarlarını (appsettings.json’dan) okuruz.
+
+- [Authorize] attribute’u ile endpoint’leri koruruz.
+
+## Gerekli NuGet Paketleri
+```c#
+dotnet add PersonnelLeaveManagement.Api package Microsoft.AspNetCore.Authentication.JwtBearer
+dotnet add PersonnelLeaveManagement.Api package System.IdentityModel.Tokens.Jwt
+dotnet add PersonelLeaveManagement.Infrastructure package BCrypt.Net-Next
+
+```
+## Domain: Kullanıcı Entity
+
+Domain/Entities/Kullanici.cs
+```c#
+namespace PersonelLeaveManagement.Domain.Entities;
+
+public class Kullanici
+{
+    public int Id { get; set; }
+    public string KullaniciAdi { get; set; } = null!;
+    public string Email { get; set; } = null!;
+    public string SifreHash { get; set; } = null!;
+    public string Rol { get; set; } = "User";
+}
+```
+
+## Infrastructure: AppDbContext’e ekle
+
+AppDbContext.cs içine:
+```c#
+public DbSet<Kullanici> Kullanicilar { get; set; }
+```
+
+
+Ve hemen migration alalım:
+
+``bash
+dotnet ef migrations add AddKullanici -p .\PersonelLeaveManagement.Infrastructure -s .\PersonelLeaveManagement.Api
+dotnet ef database update -p .\PersonelLeaveManagement.Infrastructure -s .\PersonelLeaveManagement.Api
+````
+
+## Application: DTO + Interface
+DTO
+
+Application/DTOs/KullaniciDto.cs
+```c#
+namespace PersonelLeaveManagement.Application.DTOs;
+
+public class KullaniciLoginDto
+{
+    public string Email { get; set; } = null!;
+    public string Sifre { get; set; } = null!;
+}
+
+public class KullaniciRegisterDto
+{
+    public string KullaniciAdi { get; set; } = null!;
+    public string Email { get; set; } = null!;
+    public string Sifre { get; set; } = null!;
+    public string Rol { get; set; } = "User";
+}
+```
+
+
+Interface
+
+Application/Interfaces/IAuthService.cs
+```c#
+using PersonelLeaveManagement.Application.DTOs;
+
+namespace PersonelLeaveManagement.Application.Interfaces;
+
+public interface IAuthService
+{
+    Task<string?> LoginAsync(KullaniciLoginDto dto);
+    Task<bool> RegisterAsync(KullaniciRegisterDto dto);
+}
+```
+Infrastructure: AuthService
+
+Infrastructure/Services/AuthService.cs
+```c#
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using PersonelLeaveManagement.Application.DTOs;
+using PersonelLeaveManagement.Application.Interfaces;
+using PersonelLeaveManagement.Domain.Entities;
+using PersonelLeaveManagement.Infrastructure.Persistence;
+
+namespace PersonelLeaveManagement.Infrastructure.Services;
+
+public class AuthService : IAuthService
+{
+    private readonly AppDbContext _context;
+    private readonly IConfiguration _config;
+
+    public AuthService(AppDbContext context, IConfiguration config)
+    {
+        _context = context;
+        _config = config;
+    }
+
+    public async Task<bool> RegisterAsync(KullaniciRegisterDto dto)
+    {
+        if (await _context.Kullanicilar.AnyAsync(x => x.Email == dto.Email))
+            return false;
+
+        var kullanici = new Kullanici
+        {
+            KullaniciAdi = dto.KullaniciAdi,
+            Email = dto.Email,
+            SifreHash = BCrypt.Net.BCrypt.HashPassword(dto.Sifre),
+            Rol = dto.Rol
+        };
+
+        _context.Kullanicilar.Add(kullanici);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<string?> LoginAsync(KullaniciLoginDto dto)
+    {
+        var user = await _context.Kullanicilar.FirstOrDefaultAsync(x => x.Email == dto.Email);
+        if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Sifre, user.SifreHash))
+            return null;
+
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Role, user.Rol)
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _config["Jwt:Issuer"],
+            audience: _config["Jwt:Audience"],
+            claims: claims,
+            expires: DateTime.Now.AddHours(2),
+            signingCredentials: creds);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+}
+```
+
+
+## appsettings.json → JWT ayarları
+
+Api/appsettings.json içine ekle:
+```json
+"Jwt": {
+  "Key": "supersecretkey_1234567890",
+  "Issuer": "personelapi",
+  "Audience": "personelapi_users"
+}
+```
+
+## Program.cs → JWT yapılandırması
+
+Program.cs içine builder.Build()’den önce:
+```c#
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+
+var jwtSettings = builder.Configuration.GetSection("Jwt");
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings["Key"]!))
+    };
+});
+
+builder.Services.AddScoped<IAuthService, AuthService>();
+```
+
+
+ve aşağıya, middleware sırasına ekle:
+```c#
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+## API Controller
+
+Api/Controllers/AuthController.cs
+```c#
+using Microsoft.AspNetCore.Mvc;
+using PersonelLeaveManagement.Application.DTOs;
+using PersonelLeaveManagement.Application.Interfaces;
+
+namespace PersonelLeaveManagement.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AuthController : ControllerBase
+{
+    private readonly IAuthService _authService;
+
+    public AuthController(IAuthService authService)
+    {
+        _authService = authService;
+    }
+
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] KullaniciRegisterDto dto)
+    {
+        var result = await _authService.RegisterAsync(dto);
+        return result ? Ok("Kayıt başarılı") : BadRequest("Bu e-posta zaten kayıtlı");
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] KullaniciLoginDto dto)
+    {
+        var token = await _authService.LoginAsync(dto);
+        if (token == null)
+            return Unauthorized("Geçersiz e-posta veya şifre");
+
+        return Ok(new { Token = token });
+    }
+}
+```
+
+## Test
+
+- 1️⃣ Swagger’da /api/Auth/register çağır → yeni kullanıcı oluştur.
+- 2️⃣ /api/Auth/login → email/şifre gönder, token döner.
+- 3️⃣ Token’ı kopyala, Swagger’da sağ üstte “Authorize” butonuna tıkla →
+Bearer <token> formatında yapıştır.
+- 4️⃣ Artık [Authorize] ile korunan endpoint’lere erişebilirsin.
+
+Örnek:
+````c#
+[Authorize]
+[HttpGet("secret")]
+public IActionResult SecretArea() => Ok("Sadece token'lı kullanıcılar burayı görebilir!");
+```

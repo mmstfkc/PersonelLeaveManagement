@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Personel> Personeller { get; set; }
     public DbSet<IzinTalebi> IzinTalepleri { get; set; }
+    public DbSet<Kullanici> Kullanicilar { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

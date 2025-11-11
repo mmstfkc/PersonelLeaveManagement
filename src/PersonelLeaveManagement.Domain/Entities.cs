@@ -27,3 +27,12 @@ public class IzinTalebi
     public Personel? Personel { get; set; }
 }
 
+
+public class Kullanici
+{
+    public int Id { get; set; }
+    public string KullaniciAdi { get; set; } = null!;
+    public string Email { get; set; } = null!;
+    public string SifreHash { get; set; } = null!;
+    public string Rol { get; set; } = "User";
+}
