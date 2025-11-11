@@ -1,16 +1,23 @@
 using Microsoft.EntityFrameworkCore;
 using PersonelLeaveManagement.Infrastructure.Persistence;
-using PersonelLeaveManagement.Application.Interfaces;
 using PersonelLeaveManagement.Infrastructure.Services;
+using PersonelLeaveManagement.Application.Validators;
+using PersonelLeaveManagement.Infrastructure.Repositories;
+using PersonelLeaveManagement.Application.Interfaces;
+using FluentValidation.AspNetCore;
+using PersonelLeaveManagement.Api.Middlewares;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<PersonelValidator>());
+
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
 options.UseSqlServer(connectionString));
 
+builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IPersonelService, PersonelService>();
 builder.Services.AddScoped<IIzinTalebiService, IzinTalebiService>();
 builder.Services.AddEndpointsApiExplorer();
@@ -30,6 +37,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseMiddleware<ExceptionMiddleware>();
 
 app.UseAuthentication();
 

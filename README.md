@@ -647,3 +647,308 @@ Orada:
 
 endpoint’leri listelenmiş olmalı.
 Yeni personel ekleyip izin talebi oluşturabilirsin.
+
+# Kurumsal Seviyeye Geçiş
+(Repository Pattern + Validation + Global Exception Middleware)
+
+Bu aşamada amacımız:
+- ✅ Kodun kurumsal standartlara uygun hale gelmesi
+- ✅ Validation (veri kontrolü) eklendiğinde API’nin güvenilirleşmesi
+- ✅ Global exception middleware ile hataların kontrol altına alınması
+- ✅ Repository pattern ile data erişiminin soyutlanması
+
+## Repository Pattern Yapısı
+Şu anda servisler doğrudan AppDbContext kullanıyor.
+Biz bunu Repository aracılığıyla soyutlayacağız.
+
+📁 Infrastructure katmanında yeni klasör oluştur:
+
+Repositories
+
+### IGenericRepository.cs → Application katmanına (Interfaces altına)
+```c#
+using System.Linq.Expressions;
+
+namespace PersonnelLeaveManagement.Application.Interfaces;
+
+public interface IGenericRepository<T> where T : class
+{
+    Task<IEnumerable<T>> GetAllAsync();
+    Task<T?> GetByIdAsync(int id);
+    Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate);
+    Task AddAsync(T entity);
+    void Remove(T entity);
+    Task<int> SaveChangesAsync();
+}
+```
+
+### GenericRepository.cs → Infrastructure/Repositories altına
+```c#
+using Microsoft.EntityFrameworkCore;
+using PersonnelLeaveManagement.Application.Interfaces;
+using PersonnelLeaveManagement.Infrastructure.Persistence;
+using System.Linq.Expressions;
+
+namespace PersonnelLeaveManagement.Infrastructure.Repositories;
+
+public class GenericRepository<T> : IGenericRepository<T> where T : class
+{
+    protected readonly AppDbContext _context;
+    private readonly DbSet<T> _dbSet;
+
+    public GenericRepository(AppDbContext context)
+    {
+        _context = context;
+        _dbSet = _context.Set<T>();
+    }
+
+    public async Task<IEnumerable<T>> GetAllAsync() => await _dbSet.AsNoTracking().ToListAsync();
+
+    public async Task<T?> GetByIdAsync(int id) => await _dbSet.FindAsync(id);
+
+    public async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate) =>
+        await _dbSet.Where(predicate).AsNoTracking().ToListAsync();
+
+    public async Task AddAsync(T entity) => await _dbSet.AddAsync(entity);
+
+    public void Remove(T entity) => _dbSet.Remove(entity);
+
+    public async Task<int> SaveChangesAsync() => await _context.SaveChangesAsync();
+}
+```
+
+### Somut repository’ler → Infrastructure/Repositories altına
+
+PersonelRepository.cs
+```c#
+using PersonnelLeaveManagement.Domain.Entities;
+using PersonnelLeaveManagement.Infrastructure.Persistence;
+
+namespace PersonnelLeaveManagement.Infrastructure.Repositories;
+
+public class PersonelRepository : GenericRepository<Personel>
+{
+    public PersonelRepository(AppDbContext context) : base(context)
+    {
+    }
+}
+```
+
+IzinTalebiRepository.cs
+```c#
+using PersonnelLeaveManagement.Domain.Entities;
+using PersonnelLeaveManagement.Infrastructure.Persistence;
+
+namespace PersonnelLeaveManagement.Infrastructure.Repositories;
+
+public class IzinTalebiRepository : GenericRepository<IzinTalebi>
+{
+    public IzinTalebiRepository(AppDbContext context) : base(context)
+    {
+    }
+}
+```
+
+## Servisleri Repository’e göre güncelle
+Şimdi PersonelService ve IzinTalebiService artık _context yerine _repository kullanacak.
+
+PersonelService.cs
+```c#
+using PersonnelLeaveManagement.Application.DTOs;
+using PersonnelLeaveManagement.Application.Interfaces;
+using PersonnelLeaveManagement.Domain.Entities;
+
+namespace PersonnelLeaveManagement.Infrastructure.Services;
+
+public class PersonelService : IPersonelService
+{
+    private readonly IGenericRepository<Personel> _repository;
+
+    public PersonelService(IGenericRepository<Personel> repository)
+    {
+        _repository = repository;
+    }
+
+    public async Task<IEnumerable<PersonelDto>> GetAllAsync()
+    {
+        var data = await _repository.GetAllAsync();
+        return data.Select(x => new PersonelDto
+        {
+            Id = x.Id,
+            Ad = x.Ad,
+            Soyad = x.Soyad,
+            TcKimlikNo = x.TcKimlikNo,
+            IseGirisTarihi = x.IseGirisTarihi
+        });
+    }
+
+    public async Task<PersonelDto?> GetByIdAsync(int id)
+    {
+        var x = await _repository.GetByIdAsync(id);
+        if (x == null) return null;
+        return new PersonelDto
+        {
+            Id = x.Id,
+            Ad = x.Ad,
+            Soyad = x.Soyad,
+            TcKimlikNo = x.TcKimlikNo,
+            IseGirisTarihi = x.IseGirisTarihi
+        };
+    }
+
+    public async Task<PersonelDto> CreateAsync(PersonelDto dto)
+    {
+        var entity = new Personel
+        {
+            Ad = dto.Ad,
+            Soyad = dto.Soyad,
+            TcKimlikNo = dto.TcKimlikNo,
+            IseGirisTarihi = dto.IseGirisTarihi
+        };
+
+        await _repository.AddAsync(entity);
+        await _repository.SaveChangesAsync();
+
+        dto.Id = entity.Id;
+        return dto;
+    }
+
+    public async Task<bool> UpdateAsync(int id, PersonelDto dto)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null) return false;
+
+        entity.Ad = dto.Ad;
+        entity.Soyad = dto.Soyad;
+        entity.TcKimlikNo = dto.TcKimlikNo;
+        entity.IseGirisTarihi = dto.IseGirisTarihi;
+
+        await _repository.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> DeleteAsync(int id)
+    {
+        var entity = await _repository.GetByIdAsync(id);
+        if (entity == null) return false;
+
+        _repository.Remove(entity);
+        await _repository.SaveChangesAsync();
+        return true;
+    }
+}
+```
+IzinTalebiService için de aynı şekilde IGenericRepository<IzinTalebi> enjekte edeceğiz.
+
+## Repository’leri DI (Dependency Injection) içine kaydet
+Program.cs dosyasına şu satırı ekle:
+
+```c#
+using PersonnelLeaveManagement.Application.Interfaces;
+using PersonnelLeaveManagement.Infrastructure.Repositories;
+
+// Repository kayıtları
+builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
+```
+Artık servisler _context yerine repository kullanacak şekilde otomatik bağlanıyor.
+
+
+# FluentValidation ile Validation Katmanı
+Paket kur
+```bash
+dotnet add PersonnelLeaveManagement.Api package FluentValidation.AspNetCore
+```
+
+## Application katmanına Validators klasörü aç
+PersonelValidator.cs
+```c#
+using FluentValidation;
+using PersonnelLeaveManagement.Application.DTOs;
+
+namespace PersonnelLeaveManagement.Application.Validators;
+
+public class PersonelValidator : AbstractValidator<PersonelDto>
+{
+    public PersonelValidator()
+    {
+        RuleFor(x => x.Ad).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.Soyad).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.TcKimlikNo)
+            .NotEmpty().Length(11)
+            .Matches("^[0-9]+$").WithMessage("TCKN sadece rakamlardan oluşmalıdır.");
+    }
+}
+```
+
+## Program.cs’de FluentValidation ekle
+```c#
+using FluentValidation.AspNetCore;
+using PersonnelLeaveManagement.Application.Validators;
+
+builder.Services.AddControllers()
+    .AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<PersonelValidator>());
+```
+
+# Global Exception Middleware
+Infrastructure veya Api katmanında Middlewares klasörü aç
+
+ExceptionMiddleware.cs
+```c#
+using System.Net;
+using System.Text.Json;
+
+namespace PersonnelLeaveManagement.Api.Middlewares;
+
+public class ExceptionMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<ExceptionMiddleware> _logger;
+
+    public ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Beklenmeyen hata oluştu: {Message}", ex.Message);
+            context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            context.Response.ContentType = "application/json";
+
+            var result = JsonSerializer.Serialize(new
+            {
+                Message = "Sunucu hatası oluştu.",
+                Detail = ex.Message
+            });
+            await context.Response.WriteAsync(result);
+        }
+    }
+}
+```
+
+## Program.cs’ye ekle
+```c#
+using PersonnelLeaveManagement.Api.Middlewares;
+
+app.UseMiddleware<ExceptionMiddleware>();
+```
+
+Şimdi test zamanı
+
+Swagger’da POST /api/Personel çağır:
+
+Ad boş gönder → 400 döner.
+
+TcKimlikNo 9 haneli gönder → 400 döner (validator çalışıyor).
+
+Rastgele exception fırlatmak için bir metodda throw new Exception("Test"); dersen,
+Middleware bunu yakalayıp { "Message": "Sunucu hatası oluştu." } döner.
+
+Kod artık repository pattern, validation, global error handling ile kurumsal hale geldi 🎯

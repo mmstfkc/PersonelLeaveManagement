@@ -1,23 +1,22 @@
-﻿using Microsoft.EntityFrameworkCore;
-using PersonelLeaveManagement.Application.DTOs;
+﻿using PersonelLeaveManagement.Application.DTOs;
 using PersonelLeaveManagement.Application.Interfaces;
 using PersonelLeaveManagement.Domain.Entities;
-using PersonelLeaveManagement.Infrastructure.Persistence;
+using PersonelLeaveManagement.Infrastructure.Repositories;
 
 namespace PersonelLeaveManagement.Infrastructure.Services;
 
 public class IzinTalebiService : IIzinTalebiService
 {
-    private readonly AppDbContext _context;
+    private readonly IGenericRepository<IzinTalebi> _repository;
 
-    public IzinTalebiService(AppDbContext context)
+    public IzinTalebiService(IGenericRepository<IzinTalebi> repository)
     {
-        _context = context;
+        _repository = repository;
     }
 
     public async Task<IEnumerable<IzinTalebiDto>> GetAllAsync()
     {
-        var data = await _context.IzinTalepleri.AsNoTracking().ToListAsync();
+        var data = await _repository.GetAllAsync();
         return data.Select(x => new IzinTalebiDto
         {
             Id = x.Id,
@@ -30,7 +29,7 @@ public class IzinTalebiService : IIzinTalebiService
 
     public async Task<IzinTalebiDto> GetByIdAsync(int id)
     {
-        var x = await _context.IzinTalepleri.FindAsync(id);
+        var x = await _repository.GetByIdAsync(id);
         if (x == null) return null;
 
         return new IzinTalebiDto
@@ -53,8 +52,8 @@ public class IzinTalebiService : IIzinTalebiService
             Durum = dto.Durum
         };
 
-        _context.IzinTalepleri.Add(entity);
-        await _context.SaveChangesAsync();
+        await _repository.AddAsync(entity);
+        await _repository.SaveChangesAsync();
 
         dto.Id = entity.Id;
         return dto;
@@ -62,24 +61,24 @@ public class IzinTalebiService : IIzinTalebiService
 
     public async Task<bool> UpdateAsync(int id, IzinTalebiDto dto)
     {
-        var entity = await _context.IzinTalepleri.FindAsync(id);
+        var entity = await _repository.GetByIdAsync(id);
         if (entity == null) return false;
 
         entity.BaslangicTarihi = dto.BaslangicTarihi;
         entity.BitisTarihi = dto.BitisTarihi;
         entity.Durum = dto.Durum;
 
-        await _context.SaveChangesAsync();
+        await _repository.SaveChangesAsync();
         return true;
     }
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var entity = await _context.IzinTalepleri.FindAsync(id);
+        var entity = await _repository.GetByIdAsync(id);
         if (entity == null) return false;
 
-        _context.IzinTalepleri.Remove(entity);
-        await _context.SaveChangesAsync();
+        _repository.Remove(entity);
+        await _repository.SaveChangesAsync();
         return true;
     }
 }

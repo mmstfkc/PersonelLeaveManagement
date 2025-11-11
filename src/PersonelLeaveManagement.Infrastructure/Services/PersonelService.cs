@@ -1,23 +1,22 @@
-﻿using Microsoft.EntityFrameworkCore;
-using PersonelLeaveManagement.Application.DTOs;
+﻿using PersonelLeaveManagement.Application.DTOs;
 using PersonelLeaveManagement.Application.Interfaces;
 using PersonelLeaveManagement.Domain.Entities;
-using PersonelLeaveManagement.Infrastructure.Persistence;
+using PersonelLeaveManagement.Infrastructure.Repositories;
 
 namespace PersonelLeaveManagement.Infrastructure.Services;
 
 public class PersonelService : IPersonelService
 {
-    private readonly AppDbContext _context;
+    private readonly IGenericRepository<Personel> _repository;
 
-    public PersonelService(AppDbContext context)
+    public PersonelService(IGenericRepository<Personel> repository)
     {
-        _context = context;
+        _repository = repository;
     }
     
     public async Task<IEnumerable<PersonelDto>> GetAllAsync()
     {
-        var data = await _context.Personeller.AsNoTracking().ToListAsync();
+        var data = await _repository.GetAllAsync();
         return data.Select(x => new PersonelDto
         {
             Id = x.Id,
@@ -30,7 +29,7 @@ public class PersonelService : IPersonelService
 
     public async Task<PersonelDto?> GetByIdAsync(int id)
     {
-        var x = await _context.Personeller.FindAsync(id);
+        var x = await _repository.GetByIdAsync(id);
         if (x == null) return null;
         return new PersonelDto
         {
@@ -52,8 +51,8 @@ public class PersonelService : IPersonelService
             IseGirisTarihi = dto.IseGirisTarihi
         };
 
-        _context.Personeller.Add(entity);
-        await _context.SaveChangesAsync();
+        await _repository.AddAsync(entity);
+        await _repository.SaveChangesAsync();
 
         dto.Id = entity.Id;
         return dto;
@@ -61,7 +60,7 @@ public class PersonelService : IPersonelService
 
     public async Task<bool> UpdateAsync(int id, PersonelDto dto)
     {
-        var entity = await _context.Personeller.FindAsync(id);
+        var entity = await _repository.GetByIdAsync(id);
         if (entity == null) return false;
 
         entity.Ad = dto.Ad;
@@ -69,16 +68,17 @@ public class PersonelService : IPersonelService
         entity.TCKimlikNo = dto.TCKimlikNo;
         entity.IseGirisTarihi = dto.IseGirisTarihi;
 
-        await _context.SaveChangesAsync();
+        await _repository.SaveChangesAsync();
         return true;
     }
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var entity = await _context.Personeller.FindAsync(id);
+        var entity = await _repository.GetByIdAsync(id);
         if (entity == null) return false;
 
-        _context.Personeller.Remove(entity);
+        _repository.Remove(entity);
+        await _repository.SaveChangesAsync();
         return true;
     }
 }
