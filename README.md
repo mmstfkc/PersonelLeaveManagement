@@ -1369,3 +1369,20 @@ Properties/launchSettings.json içinde environment ayarı olmalı:
 ```
 
 Production’a geçtiğinde bu değişkeni “Production” yapman yeterli.
+
+# Frontend (React)
+
+Projeyi oluşturuyoruz
+````bash
+npx create-react-app .
+```
+
+Gerekli paketleri üklüyoruz
+```bash
+ npm install axios react-router-dom
+```
+
+Ayağa kaldırıyoruz
+```bash
+npm start
+```
